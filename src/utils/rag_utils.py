@@ -1,21 +1,14 @@
-import requests
-from bs4 import BeautifulSoup
+import os
+import logging
+from typing import List, Dict, Any, Tuple
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.models import VectorParams, Distance
 from sentence_transformers import SentenceTransformer
-from typing import Tuple, List, Dict, Any
 import tiktoken
-import os
-import logging
 import PyPDF2
-import sys
 
 MAX_TOKEN_COUNT_FOR_SOURCE_TEXT = 3000
 logger = logging.getLogger(__name__)
-
-# srcディレクトリをモジュール検索パスに追加
-# これは、rag_utils.py が src/utils ディレクトリにある場合に必要です
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 # Qdrantクライアントを初期化
 client = QdrantClient(host="localhost", port=6333)
@@ -31,18 +24,12 @@ else:
     logger.info("コレクション 'webpages' は既に存在します。")
 
 
-def process_pdf(url: str, document_id: int):
+def process_pdf(file_path: str, document_id: int):
     """
-    PDFファイルのコンテンツを取得し、ベクトル化してQdrantに格納する
+    ローカルのPDFファイルのコンテンツを取得し、ベクトル化してQdrantに格納する
     """
     try:
-        # PDFファイルをダウンロード
-        response = requests.get(url)
-        response.raise_for_status()
-        with open("temp.pdf", "wb") as f:
-            f.write(response.content)
-
-        pdf_reader = PyPDF2.PdfReader(open("temp.pdf", "rb"))
+        pdf_reader = PyPDF2.PdfReader(open(file_path, "rb"))
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text()
@@ -59,7 +46,7 @@ def process_pdf(url: str, document_id: int):
                 models.PointStruct(
                     id=document_id,
                     vector=vector,
-                    payload={"url": url, "title": title, "content": text},
+                    payload={"title": title, "content": text},
                 )
             ],
         )
@@ -68,7 +55,9 @@ def process_pdf(url: str, document_id: int):
         )
 
     except Exception as e:
-        logger.error(f"PDFファイルの処理中にエラーが発生しました: {url}, エラー: {e}")
+        logger.error(
+            f"PDFファイルの処理中にエラーが発生しました: {file_path}, エラー: {e}"
+        )
 
 
 def query_index_use_user_question(user_question: str) -> List[Dict[str, Any]]:
@@ -115,7 +104,7 @@ def format_query_results(query_results: List[Dict[str, Any]]) -> str:
     source_text = ""
     for i, result in enumerate(query_results):
         subject = result.get("title", "")
-        contents = result.get("content", "")  # 辞書にキーがない場合の処理を追加
+        contents = result.get("content", "")
 
         # トークン数チェック
         token_count = calc_token_count(
@@ -148,7 +137,7 @@ def calc_token_count(model: str, text: str) -> int:
         return len(encoding.encode(text))
     except Exception:
         logger.error(
-            f"トークンカウントの計算中にエラーが発生しました in calc_token_count",
+            "トークンカウントの計算中にエラーが発生しました in calc_token_count",
             exc_info=True,
         )
         return 0
@@ -158,7 +147,7 @@ def create_response(message: Tuple[str, str]) -> str:
     """
     貰った質問文に対して、openaiのChatGPTを使って返答を生成するよ
     Args:
-        message (Tuple[str,str]): ユーザーからの質問文
+        message (Tuple[str, str]): ユーザーからの質問文
     Returns:
         response (str): ChatGPTの返答
     """
@@ -177,10 +166,10 @@ def create_response(message: Tuple[str, str]) -> str:
 
 
 if __name__ == "__main__":
-    # PDFファイルのURLとID
-    pdf_url = "https://rais.skr.u-ryukyu.ac.jp/wordpress/wp-content/uploads/jikanwari/R6-2/01gakubu/09kokusaitiiki/kokuti_keizai_2.pdf"
-    pdf_id = 2
-    process_pdf(pdf_url, pdf_id)
+    # PDFファイルのパスとID
+    pdf_file_path = "kokusaitiiki.pdf"
+    pdf_id = 1
+    process_pdf(pdf_file_path, pdf_id)
 
     # ユーザーからの質問
     user_question = "琉球大学の経済学部について教えてください"
